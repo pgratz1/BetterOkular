@@ -48,6 +48,7 @@
 #include <QScrollBar>
 #include <QSlider>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QStandardPaths>
 #include <QTemporaryFile>
 #include <QTimer>
@@ -112,6 +113,7 @@
 #include "okmenutitle.h"
 #include "pagesizelabel.h"
 #include "pageview.h"
+#include "pinnedpagespanel.h"
 #include "preferencesdialog.h"
 #include "presentationwidget.h"
 #include "propertiesdialog.h"
@@ -506,7 +508,35 @@ Part::Part(QObject *parent, const QVariantList &args)
     connect(m_document, &Document::notice, this, &Part::noticeMessage);
     connect(m_document, &Document::sourceReferenceActivated, this, &Part::slotHandleActivatedSourceReference);
     connect(m_pageView.data(), &PageView::fitWindowToPage, this, &Part::fitWindowToPage);
-    rightLayout->addWidget(m_pageView);
+    // the main page view shares its space with the (initially hidden) pinned pages panel
+    m_pinSplitter = new QSplitter(Qt::Horizontal, rightContainer);
+    m_pinSplitter->setOpaqueResize(true);
+    m_pinSplitter->setChildrenCollapsible(false);
+    m_leftPinnedPanel = new PinnedPagesPanel(m_pinSplitter, m_document, PinnedPagesPanel::LeftSide);
+    m_rightPinnedPanel = new PinnedPagesPanel(m_pinSplitter, m_document, PinnedPagesPanel::RightSide);
+    m_pinSplitter->addWidget(m_leftPinnedPanel);
+    m_pinSplitter->addWidget(m_pageView);
+    m_pinSplitter->addWidget(m_rightPinnedPanel);
+    m_pinSplitter->setStretchFactor(1, 1);
+    for (PinnedPagesPanel *panel : {m_leftPinnedPanel.data(), m_rightPinnedPanel.data()}) {
+        panel->hide();
+        connect(panel, &PinnedPagesPanel::hasPinnedPagesChanged, this, &Part::slotPinnedPagesChanged);
+        connect(panel, &PinnedPagesPanel::pinDraggedOut, this, &Part::slotPinDraggedOut);
+        connect(panel, &PinnedPagesPanel::moveToOtherSideRequested, this, [this, panel](int index) {
+            PinnedPagesPanel *other = panel == m_leftPinnedPanel ? m_rightPinnedPanel : m_leftPinnedPanel;
+            other->insertPin(panel->takePin(index));
+        });
+    }
+    connect(m_pinSplitter, &QSplitter::splitterMoved, this, [this] {
+        const QList<int> sizes = m_pinSplitter->sizes();
+        if (m_leftPinnedPanel->isVisible()) {
+            Okular::Settings::setPinnedLeftPanelWidth(sizes.at(0));
+        }
+        if (m_rightPinnedPanel->isVisible()) {
+            Okular::Settings::setPinnedRightPanelWidth(sizes.at(2));
+        }
+    });
+    rightLayout->addWidget(m_pinSplitter);
     m_layers->setPageView(m_pageView);
     m_signaturePanel->setPageView(m_pageView);
     m_findBar = new FindBar(m_document, rightContainer);
@@ -927,6 +957,18 @@ void Part::setupActions()
     ac->setDefaultShortcut(m_showPresentation, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P));
     m_showPresentation->setEnabled(false);
 
+    m_pinCurrentPage = ac->addAction(QStringLiteral("pin_current_page"));
+    m_pinCurrentPage->setText(i18n("Pin Current Page to Right"));
+    m_pinCurrentPage->setIcon(QIcon::fromTheme(QStringLiteral("window-pin")));
+    connect(m_pinCurrentPage, &QAction::triggered, this, &Part::slotPinCurrentPage);
+    ac->setDefaultShortcut(m_pinCurrentPage, QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
+
+    m_pinCurrentPageLeft = ac->addAction(QStringLiteral("pin_current_page_left"));
+    m_pinCurrentPageLeft->setText(i18n("Pin Current Page to Left"));
+    m_pinCurrentPageLeft->setIcon(QIcon::fromTheme(QStringLiteral("window-pin")));
+    connect(m_pinCurrentPageLeft, &QAction::triggered, this, &Part::slotPinCurrentPageLeft);
+    ac->setDefaultShortcut(m_pinCurrentPageLeft, QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_P));
+
     m_openContainingFolder = ac->addAction(QStringLiteral("open_containing_folder"));
     m_openContainingFolder->setText(i18n("Open Con&taining Folder"));
     m_openContainingFolder->setIcon(QIcon::fromTheme(QStringLiteral("document-open-folder")));
@@ -983,6 +1025,8 @@ Part::~Part()
 
     delete m_toc;
     delete m_layers;
+    delete m_leftPinnedPanel;
+    delete m_rightPinnedPanel;
     delete m_pageView;
     delete m_thumbnailList;
     delete m_miniBar;
@@ -3165,6 +3209,8 @@ void Part::showMenu(const Okular::Page *page, const QPoint point, const QString 
     const QAction *addBookmark = nullptr;
     const QAction *removeBookmark = nullptr;
     const QAction *fitPageWidth = nullptr;
+    const QAction *pinPageLeft = nullptr;
+    const QAction *pinPageRight = nullptr;
     if (page) {
         popup.addAction(new OKMenuTitle(&popup, i18n("Page %1", page->number() + 1)));
         if (m_thumbnailList->isVisible() && !Okular::Settings::syncThumbnailsViewport()) {
@@ -3179,6 +3225,8 @@ void Part::showMenu(const Okular::Page *page, const QPoint point, const QString 
         if (m_pageView->canFitPageWidth()) {
             fitPageWidth = popup.addAction(QIcon::fromTheme(QStringLiteral("zoom-fit-best")), i18n("Fit Width"));
         }
+        pinPageLeft = popup.addAction(QIcon::fromTheme(QStringLiteral("window-pin")), i18n("Pin Page to Left"));
+        pinPageRight = popup.addAction(QIcon::fromTheme(QStringLiteral("window-pin")), i18n("Pin Page to Right"));
         popup.addAction(m_prevBookmark);
         popup.addAction(m_nextBookmark);
         reallyShow = true;
@@ -3219,8 +3267,78 @@ void Part::showMenu(const Okular::Page *page, const QPoint point, const QString 
                 }
             } else if (res == fitPageWidth) {
                 m_pageView->fitPageWidth(page->number());
+            } else if (res == pinPageLeft) {
+                m_leftPinnedPanel->pinPage(page->number());
+            } else if (res == pinPageRight) {
+                m_rightPinnedPanel->pinPage(page->number());
             }
         }
+    }
+}
+
+void Part::slotPinCurrentPage()
+{
+    if (m_document->isOpened()) {
+        m_rightPinnedPanel->pinPage(m_document->currentPage());
+    }
+}
+
+void Part::slotPinCurrentPageLeft()
+{
+    if (m_document->isOpened()) {
+        m_leftPinnedPanel->pinPage(m_document->currentPage());
+    }
+}
+
+void Part::slotPinnedPagesChanged(bool hasPinnedPages)
+{
+    PinnedPagesPanel *panel = qobject_cast<PinnedPagesPanel *>(sender());
+    if (!panel) {
+        return;
+    }
+
+    QList<int> sizes = m_pinSplitter->sizes();
+    int total = 0;
+    for (int size : std::as_const(sizes)) {
+        total += size;
+    }
+    if (total <= 0) {
+        total = m_pinSplitter->width();
+    }
+
+    panel->setVisible(hasPinnedPages);
+    if (!hasPinnedPages) {
+        m_pageView->setFocus();
+    }
+
+    // by default give each pinned panel 35% of the space, and keep at least 25% for the main view
+    auto panelWidth = [total](const PinnedPagesPanel *p, int stored) { return !p->isVisibleTo(p->parentWidget()) ? 0 : (stored > 0 ? stored : total * 35 / 100); };
+    int left = panelWidth(m_leftPinnedPanel, Okular::Settings::pinnedLeftPanelWidth());
+    int right = panelWidth(m_rightPinnedPanel, Okular::Settings::pinnedRightPanelWidth());
+    const int maxPanels = total * 3 / 4;
+    if (left + right > maxPanels) {
+        const double scale = maxPanels / double(left + right);
+        left = qRound(left * scale);
+        right = qRound(right * scale);
+    }
+    m_pinSplitter->setSizes({left, total - left - right, right});
+}
+
+void Part::slotPinDraggedOut(int index, const QPoint globalPos)
+{
+    PinnedPagesPanel *source = qobject_cast<PinnedPagesPanel *>(sender());
+    if (!source || index < 0 || index >= source->pinCount()) {
+        return;
+    }
+
+    // a tab dropped past the middle of the main view goes to the panel on the other side
+    const int middle = m_pageView->mapToGlobal(m_pageView->rect().center()).x();
+    const bool toLeft = source == m_rightPinnedPanel && globalPos.x() < middle;
+    const bool toRight = source == m_leftPinnedPanel && globalPos.x() > middle;
+    if (toLeft) {
+        m_leftPinnedPanel->insertPin(source->takePin(index));
+    } else if (toRight) {
+        m_rightPinnedPanel->insertPin(source->takePin(index));
     }
 }
 

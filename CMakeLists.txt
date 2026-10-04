@@ -552,6 +552,7 @@ if(BUILD_DESKTOP)
     part/pageview.cpp
     part/magnifierview.cpp
     part/pageviewutils.cpp
+    part/pinnedpagespanel.cpp
     part/presentationsearchbar.cpp
     part/presentationwidget.cpp
     part/propertiesdialog.cpp

@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="okular_part" version="55">
+<gui name="okular_part" version="57">
 <MenuBar>
   <Menu name="file"><text>&amp;File</text>
     <Action name="get_new_stuff" group="file_open"/>
@@ -47,6 +47,9 @@
       <Action name="view_orientation_original"/>
     </Menu>
     <Action name="view_trim_mode"/>
+    <Separator/>
+    <Action name="pin_current_page_left"/>
+    <Action name="pin_current_page"/>
     <Separator/>
     <Action name="view_toggle_forms"/>
   </Menu>

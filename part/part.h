@@ -64,6 +64,8 @@ class FindBar;
 class ThumbnailList;
 class PageSizeLabel;
 class PageView;
+class PinnedPagesPanel;
+class QSplitter;
 class PresentationWidget;
 class ProgressWidget;
 class SearchWidget;
@@ -234,6 +236,10 @@ protected Q_SLOTS:
     bool slotSaveFileAs(bool showOkularArchiveAsDefaultFormat = false);
     void slotNewConfig();
     void slotShowMenu(const Okular::Page *page, const QPoint point);
+    void slotPinCurrentPage();
+    void slotPinCurrentPageLeft();
+    void slotPinnedPagesChanged(bool hasPinnedPages);
+    void slotPinDraggedOut(int index, const QPoint globalPos);
     void slotShowTOCMenu(const Okular::DocumentViewport &vp, const QPoint point, const QString &title);
     void slotShowProperties();
     void slotShowEmbeddedFiles();
@@ -369,6 +375,9 @@ private:
 #endif
     QPointer<ThumbnailList> m_thumbnailList;
     QPointer<PageView> m_pageView;
+    QSplitter *m_pinSplitter = nullptr;
+    QPointer<PinnedPagesPanel> m_leftPinnedPanel;
+    QPointer<PinnedPagesPanel> m_rightPinnedPanel;
     QPointer<TOC> m_toc;
     bool m_tocEnabled;
     QPointer<MiniBarLogic> m_miniBarLogic;
@@ -429,6 +438,8 @@ private:
     QAction *m_share;
 #endif
     QAction *m_showPresentation;
+    QAction *m_pinCurrentPage = nullptr;
+    QAction *m_pinCurrentPageLeft = nullptr;
     QAction *m_openContainingFolder;
     KHamburgerMenu *m_hamburgerMenuAction;
     KToggleAction *m_showMenuBarAction;

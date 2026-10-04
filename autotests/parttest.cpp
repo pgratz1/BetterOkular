@@ -17,6 +17,7 @@
 #include "../core/form.h"
 #include "../core/page.h"
 #include "../part/pageview.h"
+#include "../part/pinnedpagespanel.h"
 #include "../part/part.h"
 #include "../part/presentationwidget.h"
 #include "../part/sidebar.h"
@@ -38,6 +39,9 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QSpinBox>
+#include <QSplitter>
+#include <QTabBar>
 #include <QTabletEvent>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
@@ -62,6 +66,7 @@ private Q_SLOTS:
     void init();
 
     void testZoomWithCrop();
+    void testPinPages();
     void testReload();
     void testCanceledReload();
     void testTOCReload();
@@ -172,6 +177,134 @@ void PartTest::init()
 }
 
 // Test that Okular doesn't crash after a successful reload
+void PartTest::testPinPages()
+{
+    QVariantList dummyArgs;
+    Okular::Part part(nullptr, dummyArgs);
+    QVERIFY(openDocument(&part, QStringLiteral(KDESRCDIR "data/simple-multipage.pdf")));
+    QCOMPARE(part.m_document->pages(), 40u);
+
+    part.widget()->resize(1200, 800);
+    part.widget()->show();
+    if (qgetenv("KDECI_CANNOT_CREATE_WINDOWS") == "1") {
+        QSKIP("KDE CI can't create a window on this platform, skipping some gui tests");
+    }
+    QVERIFY(QTest::qWaitForWindowExposed(part.widget()));
+
+    PinnedPagesPanel *left = part.m_leftPinnedPanel;
+    PinnedPagesPanel *right = part.m_rightPinnedPanel;
+    QVERIFY(!left->isVisible());
+    QVERIFY(!right->isVisible());
+    PinnedPageView *rightView = right->findChild<PinnedPageView *>();
+    PinnedPageView *leftView = left->findChild<PinnedPageView *>();
+    QTabBar *rightTabs = right->findChild<QTabBar *>();
+    QTabBar *leftTabs = left->findChild<QTabBar *>();
+    QSpinBox *rightSpinBox = right->findChild<QSpinBox *>();
+    QVERIFY(rightView && leftView && rightTabs && leftTabs && rightSpinBox);
+
+    // pinning shows the panel on that side and renders the page for it
+    right->pinPage(5);
+    QVERIFY(right->isVisible());
+    QVERIFY(!left->isVisible());
+    QCOMPARE(right->pinCount(), 1);
+    QTRY_COMPARE(rightView->currentPage(), 5);
+    QVERIFY(right->showsPage(5));
+    QCOMPARE(rightTabs->tabText(0), QStringLiteral("p. 6"));
+    QTRY_VERIFY(part.m_document->page(5)->hasPixmap(right));
+    QVERIFY(!right->canUnloadPixmap(5));
+
+    left->pinPage(10);
+    QVERIFY(left->isVisible());
+    QVERIFY(right->isVisible());
+    QTRY_VERIFY(part.m_document->page(10)->hasPixmap(left));
+    // the main view keeps a sensible share of the space
+    QVERIFY(part.m_pageView->width() >= part.m_pinSplitter->width() / 4 - 10);
+
+    // pinning a page already shown just selects that tab, invalid pages are ignored
+    right->pinPage(5);
+    right->pinPage(-1);
+    right->pinPage(40);
+    QCOMPARE(right->pinCount(), 1);
+
+    // each pinned view navigates on its own, the main view does not move
+    const int mainPage = part.m_document->currentPage();
+    rightSpinBox->setValue(20);
+    QTRY_COMPARE(rightView->currentPage(), 19);
+    QCOMPARE(rightTabs->tabText(0), QStringLiteral("p. 20"));
+    QCOMPARE(int(part.m_document->currentPage()), mainPage);
+    QTRY_VERIFY(part.m_document->page(19)->hasPixmap(right));
+
+    rightView->verticalScrollBar()->setValue(rightView->verticalScrollBar()->maximum());
+    QVERIFY(rightView->currentPage() > 30);
+    QCOMPARE(rightSpinBox->value(), rightView->currentPage() + 1);
+    QCOMPARE(int(part.m_document->currentPage()), mainPage);
+
+    // ...and moving the main view does not move the pinned ones
+    part.m_document->setViewportPage(30);
+    QCOMPARE(leftView->currentPage(), 10);
+
+    // independent rotation: the page turns sideways and is still rendered
+    rightView->scrollToPage(3);
+    QCOMPARE(rightView->currentPage(), 3);
+    const QRect portrait = rightView->pageRect(3);
+    QVERIFY(portrait.height() > portrait.width());
+    rightView->rotateBy(1);
+    QCOMPARE(rightView->rotation(), 1);
+    QCOMPARE(rightView->currentPage(), 3);
+    const QRect landscape = rightView->pageRect(3);
+    QVERIFY(landscape.width() > landscape.height());
+    QTRY_VERIFY(part.m_document->page(3)->hasPixmap(right, landscape.height(), landscape.width()));
+    QCOMPARE(leftView->rotation(), 0);
+
+    // moving a tab to the other side keeps its state
+    Q_EMIT right->moveToOtherSideRequested(0);
+    QVERIFY(!right->isVisible());
+    QCOMPARE(left->pinCount(), 2);
+    QCOMPARE(leftTabs->currentIndex(), 1);
+    QCOMPARE(leftView->rotation(), 1);
+    QCOMPARE(leftView->currentPage(), 3);
+
+    // switching tabs restores each tab's own state
+    leftTabs->setCurrentIndex(0);
+    QCOMPARE(leftView->rotation(), 0);
+    QCOMPARE(leftView->currentPage(), 10);
+    leftTabs->setCurrentIndex(1);
+    QCOMPARE(leftView->rotation(), 1);
+    QCOMPARE(leftView->currentPage(), 3);
+
+    // dragging a tab out of the bar and dropping it past the middle of the main view moves it
+    const QPoint tabCenter = leftTabs->tabRect(1).center();
+    const QPoint dropGlobal = part.m_pageView->mapToGlobal(QPoint(part.m_pageView->width() * 3 / 4, part.m_pageView->height() / 2));
+    const QPoint dropLocal = leftTabs->mapFromGlobal(dropGlobal);
+    QTest::mousePress(leftTabs, Qt::LeftButton, Qt::NoModifier, tabCenter);
+    QTest::mouseMove(leftTabs, tabCenter + QPoint(0, 60));
+    QTest::mouseMove(leftTabs, dropLocal);
+    QTest::mouseRelease(leftTabs, Qt::LeftButton, Qt::NoModifier, dropLocal);
+    QTRY_COMPARE(right->pinCount(), 1);
+    QCOMPARE(left->pinCount(), 1);
+    QVERIFY(right->isVisible());
+    QCOMPARE(rightView->currentPage(), 3);
+
+    // the pin actions pin the current page of the main view
+    part.m_document->setViewportPage(7);
+    part.m_pinCurrentPageLeft->trigger();
+    QCOMPARE(left->pinCount(), 2);
+    QVERIFY(left->showsPage(7));
+    part.m_pinCurrentPage->trigger();
+    QCOMPARE(right->pinCount(), 2);
+
+    // closing all the tabs of a side hides it
+    QVERIFY(QMetaObject::invokeMethod(rightTabs, "tabCloseRequested", Q_ARG(int, 0)));
+    QVERIFY(QMetaObject::invokeMethod(rightTabs, "tabCloseRequested", Q_ARG(int, 0)));
+    QVERIFY(right->isEmpty());
+    QVERIFY(!right->isVisible());
+
+    // opening another document clears the pins
+    QVERIFY(openDocument(&part, QStringLiteral(KDESRCDIR "data/file1.pdf")));
+    QVERIFY(left->isEmpty());
+    QVERIFY(!left->isVisible());
+}
+
 void PartTest::testReload()
 {
     QVariantList dummyArgs;
