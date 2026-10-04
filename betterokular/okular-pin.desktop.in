@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Okular (Pinned Pages)
+GenericName=Document Viewer
+Comment=Okular with pinned side-by-side page views
+Exec=@LAUNCHER@ %U
+Icon=okular
+Terminal=false
+Categories=Qt;KDE;Graphics;Office;Viewer;
+MimeType=application/pdf;application/x-gzpdf;application/x-bzpdf;application/postscript;application/x-gzpostscript;application/x-bzpostscript;image/x-eps;image/x-gzeps;image/x-bzeps;image/vnd.djvu;application/x-dvi;application/x-gzdvi;application/x-bzdvi;application/epub+zip;application/vnd.ms-xpsdocument;application/oxps;application/x-cbz;application/x-cbr;application/x-cb7;application/x-cbt;application/x-mobipocket-ebook;application/x-fictionbook+xml;application/vnd.kde.okular-archive;
+Keywords=PDF;Okular;Pin;Document;Viewer;

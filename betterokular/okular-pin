@@ -1,0 +1,21 @@
+#!/bin/sh
+# Launch the locally built BetterOkular (Okular with pinned page views)
+# installed in ~/okular-install, instead of the system Okular.
+# Installed to ~/.local/bin/okular-pin by betterokular/install.sh.
+# Rebuild after system Qt/KDE updates:
+#   cmake --build ~/okular-build && cmake --install ~/okular-build
+
+PREFIX="${BETTEROKULAR_PREFIX:-$HOME/okular-install}"
+LIBDIR="$PREFIX/lib/x86_64-linux-gnu"
+
+if [ ! -x "$PREFIX/bin/okular" ]; then
+    echo "okular-pin: $PREFIX/bin/okular not found, falling back to the system okular" >&2
+    exec /usr/bin/okular "$@"
+fi
+
+export QT_PLUGIN_PATH="$LIBDIR/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+export QML2_IMPORT_PATH="$LIBDIR/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
+export XDG_DATA_DIRS="$PREFIX/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export XDG_CONFIG_DIRS="$PREFIX/etc/xdg:${XDG_CONFIG_DIRS:-/etc/xdg}"
+
+exec "$PREFIX/bin/okular" "$@"
