@@ -536,7 +536,7 @@ Part::Part(QObject *parent, const QVariantList &args)
             Okular::Settings::setPinnedRightPanelWidth(sizes.at(2));
         }
     });
-    rightLayout->addWidget(m_pinSplitter);
+    rightLayout->addWidget(m_pinSplitter, 1);
     m_layers->setPageView(m_pageView);
     m_signaturePanel->setPageView(m_pageView);
     m_findBar = new FindBar(m_document, rightContainer);
